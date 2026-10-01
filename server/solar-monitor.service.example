@@ -1,0 +1,16 @@
+# Copy to /etc/systemd/system/solar-monitor.service and adjust User and paths.
+[Unit]
+Description=Solar monitor (inverter history + dashboard)
+After=network.target
+
+[Service]
+User=solar
+WorkingDirectory=/opt/solar-monitor
+# .env holds SOLAR_TOKEN (and optionally SOLAR_PORT, SOLAR_DB, SOLAR_CONFIG)
+EnvironmentFile=/opt/solar-monitor/.env
+ExecStart=/usr/bin/python3 /opt/solar-monitor/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

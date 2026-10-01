@@ -1,0 +1,38 @@
+:root {
+    --bg: #222;
+    --fg: #ccc;
+    --fg2: #fff;
+
+    --info: #0072c8;
+    --warn: #fa0;
+    --success: #0b0;
+
+    --input-bg: #333;
+    --table-border: #333;
+
+    --nav-bg: #333;
+    --primary: #004d87;
+    --primary-disabled: #ccc;
+    --primary-hover: #023155;
+    --secondary: #0072c8;
+    --nav-active: #555;
+    --footer-bg: #282828;
+    --modal-bg: #282828;
+
+    --invalid-bg: #400;
+
+    --total-head-title: #551;
+    --total-bg: #662;
+    --iv-head-title: #151;
+    --iv-head-bg: #262;
+    --iv-dis-title: #333;
+    --iv-dis: #444;
+    --ch-head-title: #125;
+    --ch-head-bg: #236;
+    --ts-head: #333;
+    --ts-bg: #555;
+
+    --chart-cont: #0b0b0b;
+    --chart-bg: #090909;
+    --chart-text: #FFFFFF;
+}

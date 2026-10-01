@@ -1,0 +1,151 @@
+name: "issue report"
+description: "issue report"
+labels: ["new", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Bitte die Posting Guide lines lesen, Vorlage kopieren und ausfüllen und in Eurem Support Forum Eintrag posten.
+        Wir lesen auch gerne Deutsch, bitte fülle die u.a. Fragen aus damit wir Dir bestmöglich helfen können Danke!
+        Bitte unser FAQ als Hilfestellung prüfen: https://ahoydtu.de/faq
+        
+        Please read, then copy & fill in the template from our Posting Guide lines into your Support Forum post.
+        We do enjoy the english language, but we need a couple of things to best support you in your goal, please fill in all / most of the details given below. Thanks!
+        Check our FAQ: https://ahoydtu.de/faq
+  - type: markdown
+    attributes:
+      value: "## Hardware"
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Which Hardware are you using to run AhoyDTU on ?
+      options:
+        - ESP8266
+        - ESP32
+        - RaspberryPi
+    validations:
+      required: true
+  - type: dropdown
+    id: assembly-type
+    attributes:
+      label: Assembly
+      description:
+      options:
+        - I did the assembly by myself
+        - the DTU was already assembled
+    validations:
+      required: true
+  - type: dropdown
+    id: nrf24l01-module
+    attributes:
+      label: nRF24L01+ Module
+      description: |
+        What type of nRF24L01+ chip is on your nRF24L01+ module ?
+        * you verified this is a **nRF24L01+ plus** model capable of the required 256kBit/s mode ?
+        * **square dot** indicates original Nordic Semicon chip ?
+        * **round dot** indicates copy-cat / counterfeit SI labs chip
+      multiple: true
+      options:
+        - nRF24L01+ plus 
+        - square dot
+        - round dot
+  - type: dropdown
+    id: antenna
+    attributes:
+      label: Antenna
+      description: What type of antenna has your nRF24L01+ module ?
+      options:
+        - circuit board
+        - external antenna
+    validations:
+      required: true
+  - type: dropdown
+    id: power-stabilization
+    attributes:
+      label: Power Stabilization
+      description: |
+        What kind of voltage / power stabilization have you used for your nRF24L01+ module ?
+        * **~100uF Elko** (Electrolytic Capacitor) connected between +3.3V and GND (Pin 1 & 2) of the nRF24L01+ Module
+        * special **voltage stabilizing board**
+        * **nothing** (yet)
+      options:
+        - Elko (~100uF)
+        - board
+        - nothing
+    validations:
+      required: true
+  - type: checkboxes
+    id: connection-picture
+    attributes:
+      label: Connection picture
+      description: 
+      options:
+        - label: I will attach/upload an image of my wiring
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: "## Software"
+  - type: input
+    id: software-version
+    attributes:
+      label: Version
+      description: What version of our software are you running ?
+      placeholder: 0.6.0
+    validations:
+      required: true
+  - type: input
+    id: software-githash
+    attributes:
+      label: Github Hash
+      description: Which GitHub hash has the build of our software ?
+      placeholder: abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: build-and-flash-method
+    attributes:
+      label: Build & Flash Method
+      description: What software do you use to flash / build & flash our firmware images ?
+      options:
+        - AhoyDTU Webinstaller
+        - VSCode - Platform IO (build & flash)
+        - ESP Tools (flash)
+        - Arduino IDE
+        - was already installed
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: |
+        Which settings were modified to which values? Check this page on your DTU: http://ahoy-dtu/setup
+        Do not post private data here (SSID / passwords / serial numbers)!
+      placeholder: |
+        Some examples:
+        - MqTT: only broker was added
+        - Inverter: set intervall to 5 seconds ..
+    validations:
+      required: true
+  - type: textarea
+    id: debugging
+    attributes:
+      label: Debug Serial Log output
+      description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.
+      placeholder: |
+        - USB Serial Log (attached)
+        - Setup settings (use our templates ... to be added)
+      render: shell
+  - type: textarea
+    id: description
+    attributes:
+      label: Error description
+      description: Please describe what you expected and what happened instead.
+      placeholder: |
+        1) I went to https://ahoy-dtu.de/web_install and installed latest release
+        2) I did some configurations, especially ...
+        ...
+    validations:
+      required: true

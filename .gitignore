@@ -1,0 +1,11 @@
+# local data and secrets
+solar.db*
+.env
+__pycache__/
+# PlatformIO build output
+.pio/
+firmware/ahoy/src/data/
+.DS_Store
+# site-specific config and deployment notes (tracked only in the private repo)
+private/
+server/config.json

@@ -1,0 +1,70 @@
+{
+  "site_name": "Solar Monitor",
+  "place": "Mexico City",
+  "timezone": "America/Mexico_City",
+  "latitude": 19.4326,
+  "longitude": -99.1332,
+  "public_location_decimals": 1,
+  "inverter": {
+    "model": "Hoymiles MI-1500",
+    "panels": 4,
+    "panel_max_w": 380
+  },
+  "pv": {
+    "tilt": 20,
+    "azimuth": 0,
+    "peak_w": 1520,
+    "performance_ratio": 0.8,
+    "inverter_max_w": 1500
+  },
+  "photos": {
+    "day": {
+      "file": "day.jpg",
+      "position": "center 62%",
+      "title": "Paseo de la Reforma over Chapultepec",
+      "author": "Jonathan Salvador",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Mexico_City_Reforma_skyline.jpg"
+    },
+    "dusk": {
+      "file": "dusk.jpg",
+      "position": "62% 40%",
+      "title": "Reforma skyline at sunset",
+      "author": "Eneas De Troya",
+      "license": "CC BY 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Ciudad.de.Mexico.City.-_Paseo.Reforma.Skyline_CDMX_2018.jpg"
+    },
+    "night": {
+      "file": "night.jpg",
+      "position": "center 60%",
+      "title": "The city at night from Torre Latinoamericana",
+      "author": "Rafael Aparicio",
+      "license": "CC BY-SA 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Ciudad_de_M%C3%AAxico_de_Noche_vista_desde_la_Torre_Latinoamericana_1.JPG"
+    },
+    "overcast": {
+      "file": "overcast.jpg",
+      "position": "center 55%",
+      "title": "Rooftops under a grey sky",
+      "author": "Emna Mizouni",
+      "license": "CC BY-SA 4.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Mexico_City_-_Rooftop_view.jpg"
+    },
+    "rain": {
+      "file": "rain.jpg",
+      "position": "center 50%",
+      "title": "A rainy day in the Zócalo",
+      "author": "Randal Sheppard",
+      "license": "CC BY-SA 2.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Rainy_day_in_Mexico_City_(2540596718).jpg"
+    },
+    "storm": {
+      "file": "storm.jpg",
+      "position": "center 70%",
+      "title": "Lightning over Chapultepec and Polanco",
+      "author": "Jaime Golombek",
+      "license": "CC BY 3.0",
+      "source": "https://commons.wikimedia.org/wiki/File:Tormenta_El%C3%A9ctrica_Tras_El_Castillo_De_Chapultepec_Y_Polanco_(70010275).jpeg"
+    }
+  }
+}

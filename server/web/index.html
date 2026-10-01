@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1424">
+<title>Solar Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<script src="/site.js"></script>
+<script src="/bg.js"></script>
+</head>
+<body>
+<div class="bg" id="bg" aria-hidden="true"></div>
+<div class="app">
+  <nav class="nav pad" aria-label="Pages">
+    <a class="brand" href="/">
+      <svg width="22" height="22" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="6" fill="#ffd36b"/><g stroke="#ffd36b" stroke-width="2" stroke-linecap="round"><path d="M13 1.5v3M13 21.5v3M1.5 13h3M21.5 13h3M4.9 4.9l2.1 2.1M19 19l2.1 2.1M4.9 21.1L7 19M19 7l2.1-2.1"/></g></svg>
+      Solar Monitor
+    </a>
+    <div class="nav-r">
+      <div class="links"><a href="/" aria-current="page">Overview</a><a href="/live">Inverter</a></div>
+      <details class="dlbtn">
+        <summary><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m0 0l-3.2-3.2M8 10l3.2-3.2M2.5 13.5h11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>Download</summary>
+        <form class="dlpop" id="dl">
+          <div class="row"><label>From<input type="date" id="dl-from" required></label><label>To<input type="date" id="dl-to" required></label></div>
+          <label>What
+            <select id="dl-kind">
+              <option value="daily">Daily totals</option>
+              <option value="monthly">Monthly totals</option>
+              <option value="readings">Every reading (about one per minute)</option>
+            </select>
+          </label>
+          <button class="btn" type="submit">Download CSV</button>
+        </form>
+      </details>
+    </div>
+  </nav>
+
+  <div class="stage pad">
+    <section class="now" aria-live="polite">
+      <div class="kicker"><span class="pulse off" id="pulse"></span><span id="kicker">Live from the roof</span></div>
+      <div class="giant" id="giant">–</div>
+      <p class="lede" id="lede">&nbsp;</p>
+      <div class="wx" id="wx"></div>
+      <div class="today" aria-labelledby="today-h">
+        <div class="today-head"><span id="today-h">Today, hour by hour</span><span id="today-sum"></span></div>
+        <div class="hrs" id="hrs"></div>
+        <div class="legend"><span><i class="la"></i>Made</span><span><i class="lf"></i>Expected</span></div>
+      </div>
+    </section>
+
+    <section class="board" aria-labelledby="h-prod">
+      <div class="board-head">
+        <span class="board-title" id="h-prod">Production</span>
+        <div class="seg" id="range" role="group" aria-label="Chart range">
+          <button data-r="1d" aria-pressed="true">1D</button><button data-r="1w">1W</button><button data-r="1m">1M</button><button data-r="1y">1Y</button>
+        </div>
+      </div>
+      <div class="period">
+        <button class="icon-btn" id="prev" aria-label="Previous period">‹</button>
+        <button class="icon-btn" id="next" aria-label="Next period" disabled>›</button>
+        <span class="label" id="period-label">Today</span>
+        <span class="total" id="period-total"></span>
+      </div>
+      <div class="chart" id="chart"></div>
+    </section>
+  </div>
+
+  <div class="pad">
+    <section class="strip" aria-label="Panels and totals">
+      <div class="mini-eq" id="eq" aria-label="Output of each panel"></div>
+      <div class="stat"><div class="v" id="s-today">–</div><div class="k">Made today</div></div>
+      <div class="stat"><div class="v" id="s-month">–</div><div class="k" id="s-month-k">This month</div></div>
+      <div class="stat small"><div class="v" id="s-life">–</div><div class="k">Lifetime, from the inverter's counter</div></div>
+    </section>
+    <div class="credit" id="credit"></div>
+  </div>
+</div>
+
+<script>
+siteConfig.then(CFG => {
+const TZ = CFG.timezone, LAT = CFG.latitude, LON = CFG.longitude;
+const PANEL_MAX = CFG.inverter.panel_max_w, PANELS = CFG.inverter.panels;
+const ROOF = CFG.place ? `Live from the roof in ${CFG.place}` : "Live from the roof";
+document.title = CFG.site_name;
+const $ = id => document.getElementById(id);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const api = p => fetch(p, { cache: "no-store" }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+const fmt = (v, d = 0) => v == null || isNaN(v) ? "–" : Number(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+const dtf = opts => new Intl.DateTimeFormat("en-GB", Object.assign({ timeZone: TZ }, opts));
+const fHM = dtf({ hour: "2-digit", minute: "2-digit", hour12: false });
+const fH = dtf({ hour: "numeric", hour12: false });
+const fDay = dtf({ weekday: "short", day: "numeric", month: "short" });
+const fWd = dtf({ weekday: "short", day: "numeric" });
+const fDM = dtf({ day: "numeric", month: "short" });
+const fMonY = dtf({ month: "short", year: "numeric" });
+const fMon = dtf({ month: "short" });
+const hm = ts => fHM.format(new Date(ts * 1000));
+const today = () => { const d = new Date(Date.now() + tzOffset(TZ, Date.now() / 1000) * 1000); return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())); };
+const addDays = (d, n) => new Date(d.getTime() + n * 86400e3);
+const iso = d => d.toISOString().slice(0, 10);
+const dayStart = d => { const t = d.getTime() / 1000; return t - tzOffset(TZ, t + 43200); };   // unix time of local midnight
+const asLocal = d => new Date((dayStart(d) + 43200) * 1000);                                  // local noon, safe for date labels
+
+function sunTimes(d) {
+  const n = Math.round((d - Date.UTC(d.getUTCFullYear(), 0, 0)) / 86400e3);
+  const g = 2 * Math.PI / 365 * (n - 1);
+  const eqt = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g) - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
+  const decl = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g) - 0.002697 * Math.cos(3 * g) + 0.00148 * Math.sin(3 * g);
+  const lat = LAT * Math.PI / 180;
+  const ha = Math.acos((Math.sin(-0.833 * Math.PI / 180) - Math.sin(lat) * Math.sin(decl)) / (Math.cos(lat) * Math.cos(decl))) * 180 / Math.PI;
+  const noon = 720 - 4 * LON - eqt, base = d.getTime() / 1000;
+  return { rise: base + (noon - 4 * ha) * 60, noon: base + noon * 60, set: base + (noon + 4 * ha) * 60 };
+}
+function niceMax(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v))), n = v / p;
+  return ([1, 1.2, 1.6, 2, 2.4, 3, 4, 5, 6, 8, 10].find(s => n <= s)) * p;   // all split into 4 round steps
+}
+
+/* ---------- weather ---------- */
+const WMO = c => c === 0 ? "Clear" : c <= 2 ? "Partly cloudy" : c === 3 ? "Overcast" : c <= 48 ? "Fog" : c <= 57 ? "Drizzle" : c <= 67 ? "Rain"
+  : c <= 77 ? "Snow" : c <= 82 ? "Showers" : c <= 86 ? "Snow showers" : "Thunderstorms";
+const ART = c => c === 0 ? "linear-gradient(150deg, #ffc93c 0%, #fb8500 55%, #e5541b 100%)"
+  : c <= 2 ? "linear-gradient(150deg, #ffd166 0%, #f4a259 35%, #5b9bd5 100%)"
+  : c === 3 ? "linear-gradient(150deg, #a3b2c2 0%, #6b7f94 60%, #485a6e 100%)"
+  : c <= 48 ? "linear-gradient(150deg, #c5d0da 0%, #8d9daf 100%)"
+  : c <= 67 || (c >= 80 && c <= 82) ? "linear-gradient(150deg, #5aa9e6 0%, #3a6fd8 50%, #2b2d8f 100%)"
+  : c <= 86 ? "linear-gradient(150deg, #e0f2fe 0%, #93c5fd 100%)"
+  : "linear-gradient(150deg, #8e5cf7 0%, #4b2bb3 55%, #1c1d5e 100%)";
+function icon(code, day = true, s = 26, mono = false) {
+  const Y = mono ? "rgba(255,255,255,.95)" : "#ffd36b", C = mono ? "rgba(255,255,255," : "rgba(255,255,255,";
+  const sun = `<circle cx="12" cy="12" r="4.2" fill="${Y}"/><g stroke="${Y}" stroke-width="1.6" stroke-linecap="round"><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.5 1.5M17.2 17.2l1.5 1.5M5.3 18.7l1.5-1.5M17.2 6.8l1.5-1.5"/></g>`;
+  const moon = `<path d="M15.5 4.5a7.5 7.5 0 1 0 4 12.6A6.2 6.2 0 0 1 15.5 4.5z" fill="${mono ? Y : "#9fb2c7"}"/>`;
+  const cloud = (dx = 0, dy = 0, op = 1) => `<path transform="translate(${dx} ${dy})" d="M7.5 19h9.3a3.7 3.7 0 0 0 .4-7.4 5.2 5.2 0 0 0-10-1.1A4.3 4.3 0 0 0 7.5 19z" fill="${mono ? C + op + ")" : (op < 1 ? "#b7c3cf" : "#93a3b4")}"/>`;
+  const drops = `<g stroke="${mono ? "rgba(255,255,255,.9)" : "#3a86d8"}" stroke-width="1.6" stroke-linecap="round"><path d="M9 20.5l-1 2M13 20.5l-1 2M17 20.5l-1 2"/></g>`;
+  const bolt = `<path d="M12.5 18l-2.5 4h2.5l-1 3.5 3.5-5h-2.5l1-2.5z" fill="${mono ? "#fff" : "#f2a900"}"/>`;
+  let g;
+  if (code === 0) g = day ? sun : moon;
+  else if (code <= 2) g = `<g transform="translate(-3 -3) scale(.85)">${day ? sun : moon}</g>` + cloud(2, 1);
+  else if (code === 3) g = cloud(-3, -3, 0.6) + cloud(1, 0);
+  else if (code <= 48) g = cloud(0, -2) + `<g stroke="${mono ? "#fff" : "#93a3b4"}" stroke-width="1.5" stroke-linecap="round"><path d="M5 21h14M7 23.5h10"/></g>`;
+  else if (code <= 67 || (code >= 80 && code <= 82)) g = cloud(0, -2) + drops;
+  else if (code <= 86) g = cloud(0, -2) + `<g fill="${mono ? "#fff" : "#93a3b4"}"><circle cx="9" cy="21.5" r="1"/><circle cx="13" cy="22.5" r="1"/><circle cx="17" cy="21.5" r="1"/></g>`;
+  else g = cloud(0, -3) + bolt;
+  return `<svg class="${mono ? "glyph" : ""}" width="${s}" height="${s}" viewBox="0 0 24 26" aria-label="${WMO(code)}" role="img">${g}</svg>`;
+}
+
+/* ---------- production chart ---------- */
+const chartBox = $("chart");
+let lastDraw = null;
+function setupSvg(H) {
+  chartBox.innerHTML = "";
+  const W = Math.max(chartBox.clientWidth, 280);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" }, chartBox);
+  const tip = document.createElement("div"); tip.className = "tip"; chartBox.appendChild(tip);
+  return { svg, tip, W };
+}
+function showTip(tip, html, x, y, W, svg) {
+  const r = svg.getBoundingClientRect(), sx = r.width / W;
+  tip.innerHTML = html; tip.style.display = "block";
+  const tw = tip.offsetWidth, cw = chartBox.clientWidth;
+  tip.style.left = Math.min(Math.max(x * sx - tw / 2, 0), cw - tw) + "px";
+  tip.style.top = Math.max(y * sx - tip.offsetHeight - 12, 0) + "px";
+}
+function gridY(svg, W, pad, H, ymax, unit) {
+  const u = el("text", { x: pad.l - 8, y: pad.t - 14, "text-anchor": "end" }, svg); u.textContent = unit;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + (H - pad.t - pad.b) * (1 - i / 4);
+    el("line", { x1: pad.l, x2: W - pad.r, y1: y, y2: y, stroke: i ? css("--line") : css("--line-strong"), "stroke-width": 1 }, svg);
+    if (i) { const t = el("text", { x: pad.l - 8, y: y + 4, "text-anchor": "end" }, svg); t.textContent = fmt(ymax * i / 4, ymax < 10 ? 1 : 0); }
+  }
+}
+function drawPower(points, o) {
+  lastDraw = () => drawPower(points, o);
+  const H = Math.max(180, Math.round(chartBox.clientHeight)), pad = { l: 42, r: 4, t: 30, b: 26 };
+  const { svg, tip, W } = setupSvg(H);
+  const X = ts => pad.l + (W - pad.l - pad.r) * (ts - o.x0) / (o.x1 - o.x0);
+  const ref = Math.max(0, ...points.map(p => p.pac || 0), ...(o.forecast || []).map(f => f.est_w));
+  const ymax = niceMax(Math.max(ref * 1.15, 500));
+  const Y = v => pad.t + (H - pad.t - pad.b) * (1 - v / ymax);
+  gridY(svg, W, pad, H, ymax, "W");
+  if (o.sun) {
+    const { rise, set, now } = o.sun, top = 10, base = Y(0);
+    let d = "";
+    for (let i = 0; i <= 60; i++) { const ts = rise + (set - rise) * i / 60; d += (i ? "L" : "M") + X(ts) + "," + (base - (base - top) * Math.sin(Math.PI * i / 60)); }
+    el("path", { d, fill: "none", stroke: css("--arc"), "stroke-width": 1.5, "stroke-dasharray": "3 5" }, svg);
+    const narrow = W < 600;
+    [[rise, narrow ? "↑" : "sunrise"], [set, narrow ? "↓" : "sunset"]].forEach(([ts, name]) => {
+      const t = el("text", { x: X(ts), y: H - 8, "text-anchor": "middle" }, svg); t.textContent = `${name} ${hm(ts)}`;
+    });
+    if (now && now > rise && now < set) {
+      const f = (now - rise) / (set - rise), sx = X(now), sy = base - (base - top) * Math.sin(Math.PI * f);
+      el("circle", { cx: sx, cy: sy, r: 13, fill: css("--energy-glow") }, svg);
+      el("circle", { cx: sx, cy: sy, r: 7, fill: "#ffd36b" }, svg);
+    }
+  }
+  o.ticks.forEach(t => { const tx = el("text", { x: X(t.ts), y: H - 8, "text-anchor": "middle" }, svg); tx.textContent = t.label; });
+  (o.dividers || []).forEach(ts => el("line", { x1: X(ts), x2: X(ts), y1: pad.t, y2: Y(0), stroke: css("--line"), "stroke-width": 1 }, svg));
+  if (o.forecast && o.forecast.length) {   // dashed: what the forecast expects for the rest of today
+    const fd = o.forecast.map((f, i) => (i ? "L" : "M") + X(f.ts - 1800) + "," + Y(f.est_w)).join("");
+    el("path", { d: fd, fill: "none", stroke: css("--energy-deep"), "stroke-width": 1.5, "stroke-dasharray": "2 4", opacity: 0.8 }, svg);
+  }
+  if (!points.length) {
+    const t = el("text", { x: (pad.l + W) / 2, y: (pad.t + Y(0)) / 2 + 20, "text-anchor": "middle" }, svg); t.textContent = "No readings in this period";
+    return;
+  }
+  const gap = Math.max(o.bucket * 5, 600);
+  const segs = []; let seg = [];
+  points.forEach((p, i) => { if (i && p.m - points[i - 1].m > gap) { segs.push(seg); seg = []; } seg.push([X(p.m + o.bucket / 2), Y(p.pac || 0)]); });
+  segs.push(seg);
+  let line = "", area = "";
+  segs.forEach(s => { const pts = s.map(q => q.join(",")).join("L"); line += "M" + pts; area += `M${s[0][0]},${Y(0)}L${pts}L${s[s.length - 1][0]},${Y(0)}Z`; });
+  el("path", { d: area, fill: css("--energy-wash") }, svg);
+  el("path", { d: line, fill: "none", stroke: css("--energy-deep"), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+  segs.filter(s => s.length === 1).forEach(s => el("circle", { cx: s[0][0], cy: s[0][1], r: 3, fill: css("--energy-deep") }, svg));
+  const cross = el("line", { y1: pad.t, y2: Y(0), stroke: css("--line-strong"), visibility: "hidden" }, svg);
+  const dot = el("circle", { r: 5, fill: css("--energy-deep"), stroke: "#fff", "stroke-width": 2, visibility: "hidden" }, svg);
+  const hit = el("rect", { x: pad.l, y: 0, width: W - pad.l - pad.r, height: H, fill: "transparent" }, svg);
+  const xs = points.map(p => X(p.m + o.bucket / 2));
+  hit.addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect(), sx = (ev.clientX - r.left) * W / r.width;
+    let b = 0; xs.forEach((x, i) => { if (Math.abs(x - sx) < Math.abs(xs[b] - sx)) b = i; });
+    const p = points[b], y = Y(p.pac || 0);
+    cross.setAttribute("x1", xs[b]); cross.setAttribute("x2", xs[b]); cross.setAttribute("visibility", "visible");
+    dot.setAttribute("cx", xs[b]); dot.setAttribute("cy", y); dot.setAttribute("visibility", "visible");
+    showTip(tip, `<b>${fmt(p.pac)} W</b><br>${o.showDay ? fDay.format(new Date(p.m * 1000)) + ", " : ""}${hm(p.m)}`, xs[b], y, W, svg);
+  });
+  hit.addEventListener("pointerleave", () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); });
+}
+function drawBars(items, labelEvery) {
+  lastDraw = () => drawBars(items, labelEvery);
+  const H = Math.max(180, Math.round(chartBox.clientHeight)), pad = { l: 42, r: 4, t: 30, b: 26 };
+  const { svg, tip, W } = setupSvg(H);
+  const ymax = niceMax(Math.max(1, ...items.map(i => i.kwh || 0)) * 1.1);
+  const Y = v => pad.t + (H - pad.t - pad.b) * (1 - v / ymax);
+  gridY(svg, W, pad, H, ymax, "kWh");
+  const slot = (W - pad.l - pad.r) / items.length, bw = Math.max(Math.min(slot * 0.66, 36), 2);
+  items.forEach((it, i) => {
+    const x = pad.l + slot * i + (slot - bw) / 2;
+    if (it.kwh) {
+      const y = Y(it.kwh), r = Math.min(4, bw / 2, Y(0) - y);
+      el("path", { d: `M${x},${Y(0)}V${y + r}Q${x},${y} ${x + r},${y}H${x + bw - r}Q${x + bw},${y} ${x + bw},${y + r}V${Y(0)}Z`, fill: css("--energy-deep"), opacity: it.current ? 1 : 0.8 }, svg);
+    }
+    if (i % labelEvery === 0 || i === items.length - 1) { const t = el("text", { x: x + bw / 2, y: H - 8, "text-anchor": "middle" }, svg); t.textContent = it.label; }
+    const hit = el("rect", { x: pad.l + slot * i, y: 0, width: slot, height: H, fill: "transparent" }, svg);
+    hit.addEventListener("pointerenter", () => showTip(tip, it.kwh ? `<b>${fmt(it.kwh, 2)} kWh</b><br>${it.tip}` : `No data<br>${it.tip}`, x + bw / 2, it.kwh ? Y(it.kwh) : Y(0), W, svg));
+    hit.addEventListener("pointerleave", () => { tip.style.display = "none"; });
+  });
+}
+
+let range = "1d", offset = 0, fc = null;
+try { range = localStorage.getItem("solar-range") || "1d"; } catch (e) {}
+const qs = new URLSearchParams(location.search);
+if (["1d", "1w", "1m", "1y"].includes(qs.get("range"))) range = qs.get("range");
+
+async function renderChart() {
+  $("next").disabled = offset >= 0;
+  document.querySelectorAll("#range button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.r === range)));
+  const t0 = today();
+  if (range === "1d") {
+    const d = addDays(t0, offset), s = dayStart(d), sun = sunTimes(d);
+    $("period-label").textContent = offset === 0 ? "Today" : offset === -1 ? "Yesterday" : fDay.format(asLocal(d));
+    const [day, tot] = await Promise.all([api("/api/day?date=" + iso(d)), api(`/api/daily?days=1&to=${iso(d)}`)]);
+    const pts = day.points;
+    const x0 = Math.min(sun.rise - 2400, pts.length ? pts[0].m : Infinity), x1 = Math.max(sun.set + 2400, pts.length ? pts[pts.length - 1].m + 60 : 0);
+    const ticks = []; for (let h = 9; h <= 15; h += 3) ticks.push({ ts: s + h * 3600, label: `${h}:00` });
+    const nowTs = Date.now() / 1000;
+    const forecast = offset === 0 && fc ? fc.hourly.filter(h => h.ts >= nowTs - 3600 && h.ts <= x1 + 3600) : [];
+    drawPower(pts, { x0, x1, bucket: 60, ticks, forecast, sun: { rise: sun.rise, set: sun.set, now: offset === 0 ? nowTs : null } });
+    const k = tot.days[0];
+    $("period-total").innerHTML = offset === 0 ? (forecast.length ? "dashed line: forecast for the rest of the day" : `Daylight ${hm(sun.rise)} to ${hm(sun.set)}`)
+      : !k ? "No data for this day" : `<strong>${fmt(k.kwh, 2)} kWh</strong>, peak ${fmt(k.peak_w)} W`;
+  } else if (range === "1w") {
+    const end = addDays(t0, offset * 7), start = addDays(end, -6), s = dayStart(start), e = dayStart(addDays(end, 1));
+    $("period-label").textContent = `${fDM.format(asLocal(start))} – ${fDM.format(asLocal(end))}`;
+    const [ser, tot] = await Promise.all([api(`/api/series?from=${s}&to=${e}&bucket=900`), api(`/api/daily?days=7&to=${iso(end)}`)]);
+    const ticks = [], dividers = [];
+    for (let i = 0; i < 7; i++) { const d = addDays(start, i); ticks.push({ ts: dayStart(d) + 43200, label: fWd.format(asLocal(d)) }); if (i) dividers.push(dayStart(d)); }
+    drawPower(ser.points, { x0: s, x1: e, bucket: 900, ticks, dividers, showDay: true });
+    $("period-total").innerHTML = `<strong>${fmt(tot.days.reduce((a, d) => a + d.kwh, 0), 1)} kWh</strong> in 7 days`;
+  } else if (range === "1m") {
+    const end = addDays(t0, offset * 30), start = addDays(end, -29);
+    $("period-label").textContent = `${fDM.format(asLocal(start))} – ${fDM.format(asLocal(end))}`;
+    const res = await api(`/api/daily?days=30&to=${iso(end)}`);
+    const by = Object.fromEntries(res.days.map(d => [d.date, d]));
+    const items = [];
+    for (let i = 0; i < 30; i++) {
+      const d = addDays(start, i), r = by[iso(d)];
+      items.push({ kwh: r ? r.kwh : 0, label: String(d.getUTCDate()), tip: fDay.format(asLocal(d)) + (r ? `, peak ${fmt(r.peak_w)} W` : ""), current: offset === 0 && i === 29 });
+    }
+    drawBars(items, chartBox.clientWidth < 600 ? 7 : 3);
+    $("period-total").innerHTML = `<strong>${fmt(res.days.reduce((a, d) => a + d.kwh, 0), 1)} kWh</strong> in 30 days`;
+  } else {
+    const endM = new Date(Date.UTC(t0.getUTCFullYear() + offset, t0.getUTCMonth(), 1));
+    const months = []; for (let i = 11; i >= 0; i--) months.push(new Date(Date.UTC(endM.getUTCFullYear(), endM.getUTCMonth() - i, 1)));
+    $("period-label").textContent = `${fMonY.format(asLocal(months[0]))} – ${fMonY.format(asLocal(months[11]))}`;
+    const res = await api("/api/monthly");
+    const by = Object.fromEntries(res.months.map(m => [m.month, m]));
+    const items = months.map((m, i) => { const r = by[iso(m).slice(0, 7)]; return { kwh: r ? r.kwh : 0, label: fMon.format(asLocal(m)), tip: fMonY.format(asLocal(m)) + (r ? `, ${r.days} days with data` : ""), current: offset === 0 && i === 11 }; });
+    drawBars(items, chartBox.clientWidth < 600 ? 2 : 1);
+    $("period-total").innerHTML = `<strong>${fmt(items.reduce((a, i) => a + i.kwh, 0), 1)} kWh</strong> in 12 months`;
+  }
+}
+
+
+
+/* ---------- now, today's forecast, strip ---------- */
+let fresh = false, livePac = 0, todayKwh = 0;
+async function renderLive() {
+  const [live, td] = await Promise.all([api("/api/live"), api("/api/daily?days=1")]);
+  const r = live.reading, age = live.age_s;
+  fresh = !!(r && age < 180); livePac = fresh ? r.pac : 0;
+  const k = td.days[0]; todayKwh = k ? k.kwh : 0;
+  $("pulse").className = "pulse" + (fresh ? "" : " off");
+  $("kicker").textContent = fresh ? ROOF
+    : r ? `Last heard from the roof ${age < 7200 ? Math.round(age / 60) + " minutes" : Math.round(age / 3600) + " hours"} ago` : "Waiting for the first reading";
+  $("giant").innerHTML = fresh ? `${fmt(r.pac)}<span class="u">W</span>` : `${fmt(todayKwh, 1)}<span class="u">kWh</span>`;
+  writeLede();
+  const ps = (r ? [r.p1, r.p2, r.p3, r.p4] : [0, 0, 0, 0]).slice(0, PANELS);
+  $("eq").innerHTML = ps.map((p, i) => {
+    const w = fresh ? (p || 0) : 0;
+    return `<div class="c" title="Panel ${i + 1}"><b>${fmt(w)}</b><div class="t"><i style="height:${Math.min(100, Math.max(3, w / PANEL_MAX * 100))}%"></i></div>P${i + 1}</div>`;
+  }).join("");
+  $("s-today").innerHTML = `${fmt(todayKwh, 2)}<small>kWh</small>`;
+  if (r) $("s-life").innerHTML = `${fmt(r.yt, 0)}<small>kWh</small>`;
+}
+
+function writeLede() {
+  const now = Date.now() / 1000, sun = sunTimes(today()), daylight = now > sun.rise && now < sun.set;
+  const rest = fc ? fc.hourly.filter(h => h.ts > now && h.ts <= dayStart(today()) + 86400).reduce((a, h) => a + h.est_w, 0) / 1000 : 0;
+  let t;
+  if (fresh && livePac > 5) t = `Producing right now. <b>${fmt(todayKwh, 2)} kWh</b> so far today${rest > 0.1 ? `, about ${fmt(rest, 1)} kWh more to come` : ""}.`;
+  else if (daylight) t = `<b>${fmt(todayKwh, 2)} kWh</b> made today. The panels are waiting for more sun.`;
+  else { const tm = fc && fc.daily[1] ? fc.daily[1].est_kwh : null;
+    t = `<b>${fmt(todayKwh, 2)} kWh</b> made today. Resting until sunrise at ${hm(sunTimes(addDays(today(), 1)).rise)}${tm ? `, about ${fmt(tm, 1)} kWh expected tomorrow` : ""}.`; }
+  $("lede").innerHTML = t;
+}
+
+// today, hour by hour: what the panels made (solid) against what the forecast expects (dashed)
+async function renderToday() {
+  if (!fc) return;
+  const d = today(), s = dayStart(d), sun = sunTimes(d), now = Date.now() / 1000;
+  const act = await api(`/api/series?from=${s}&to=${s + 86400}&bucket=3600`);
+  const made = Object.fromEntries(act.points.map(p => [p.m, p.pac]));
+  const h0 = Math.floor((sun.rise - s) / 3600), h1 = Math.ceil((sun.set - s) / 3600);
+  const hours = [];
+  for (let h = h0; h < h1; h++) {
+    const start = s + h * 3600, f = fc.hourly.find(x => x.ts === start + 3600);   // forecast values cover the preceding hour
+    hours.push({ h, start, est: f ? f.est_w : 0, code: f ? f.code : null, made: made[start], past: start + 3600 <= now, cur: now >= start && now < start + 3600 });
+  }
+  const max = Math.max(600, ...hours.map(x => Math.max(x.est, x.made || 0))) * 1.05;
+  $("hrs").innerHTML = hours.map(x => `<div class="hr${x.cur ? " now-h" : ""}" title="${x.h}:00–${x.h + 1}:00: ${x.made != null ? fmt(x.made) + " W made, " : ""}${fmt(x.est)} W expected">
+      ${x.code != null && x.h % 2 === 0 ? icon(x.code, true, 18) : "<svg></svg>"}
+      <div class="b"><i class="f" style="height:${x.est / max * 100}%"></i>${x.made != null && (x.past || x.cur) ? `<i class="a" style="height:${x.made / max * 100}%"></i>` : ""}</div>
+      <span>${x.h % 3 === 0 || x.cur ? x.h : "&nbsp;"}</span></div>`).join("");
+  const exp = fc.daily[0] ? fc.daily[0].est_kwh : 0;
+  $("today-sum").innerHTML = `<strong>${fmt(exp, 1)} kWh</strong> expected today`;
+}
+
+async function renderForecast() {
+  try { fc = await api("/api/forecast"); } catch (e) { $("wx").textContent = "The weather forecast is unavailable right now."; return; }
+  const c = fc.current, d0 = fc.daily[0];
+  solarBg.setWeather(c.code);
+  $("wx").innerHTML = `${icon(c.code, !!c.is_day, 24)}<span>${WMO(c.code)}, ${fmt(c.temp)}°. High ${fmt(d0.tmax)}°, low ${fmt(d0.tmin)}°.</span>`;
+  writeLede();
+  renderToday();
+  if (range === "1d" && offset === 0) renderChart();
+}
+
+async function renderTotals() {
+  const [mo, recent] = await Promise.all([api("/api/monthly"), api("/api/daily?days=31")]);
+  const t0 = today(), mKey = iso(t0).slice(0, 7);
+  const month = mo.months.find(m => m.month === mKey);
+  const first = recent.days.find(d => d.date.startsWith(mKey));
+  $("s-month").innerHTML = `${fmt(month ? month.kwh : 0, 1)}<small>kWh</small>`;
+  // monitoring started partway through this month: say so, so it isn't read as the whole month
+  const startedHere = mo.months.length && mo.months[0].month === mKey;
+  $("s-month-k").textContent = startedHere && first ? `This month, recorded since ${fDM.format(asLocal(new Date(first.date + "T00:00:00Z")))}` : "This month";
+}
+
+$("dl-to").value = iso(today());
+$("dl-from").value = iso(addDays(today(), -30));
+$("dl").addEventListener("submit", e => {
+  e.preventDefault();
+  location.href = "/api/export.csv?" + new URLSearchParams({ kind: $("dl-kind").value, from: $("dl-from").value, to: $("dl-to").value });
+});
+$("range").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  range = b.dataset.r; offset = 0;
+  try { localStorage.setItem("solar-range", range); } catch (er) {}
+  renderChart();
+});
+$("prev").onclick = () => { offset--; renderChart(); };
+$("next").onclick = () => { if (offset < 0) { offset++; renderChart(); } };
+let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => lastDraw && lastDraw(), 150); });
+
+renderLive();
+renderTotals();
+renderChart();
+renderForecast();
+setInterval(() => {
+  renderLive().catch(() => { $("kicker").textContent = "Can't reach the server right now"; });
+  if (offset === 0 && (range === "1d" || range === "1w")) renderChart();
+}, 15000);
+setInterval(() => { renderToday(); }, 120000);
+setInterval(renderForecast, 900000);
+setInterval(renderTotals, 300000);
+});
+</script>
+</body>
+</html>

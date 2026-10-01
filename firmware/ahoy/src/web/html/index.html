@@ -1,0 +1,236 @@
+<!doctype html>
+<html>
+    <head>
+        <title>Index</title>
+        {#HTML_HEADER}
+    </head>
+    <body>
+        {#HTML_NAV}
+        <div id="wrapper">
+            <div id="content">
+                <p>
+                    <span class="des">Uptime: </span><span id="uptime"></span><br/>
+                    <span class="des">ESP-Time: </span><span id="date"></span>
+                </p>
+                <p>
+                    <span class="des">System Infos:</span>
+                    <div id="total"></div>
+                    <div id="iv"></div>
+                    <div class="hr"></div>
+                    <div id="warn_info"></div>
+                </p>
+
+                <div id="note">
+                    <h3>{#SUPPORT}:</h3>
+                    <ul>
+                        <li><a href="https://github.com/lumapu/ahoy/blob/main/src/CHANGES.md" target="_blank">{#CHANGELOG}</a></li>
+                        <li>{#DISCUSS} <a href="https://discord.gg/WzhxEY62mB" target="_blank">Discord</a></li>
+                        <li>{#REPORT} <a href="https://github.com/lumapu/ahoy/issues" target="_blank">{#ISSUES}</a></li>
+                        <li>{#CONTRIBUTE} <a href="https://docs.ahoydtu.de"  target="_blank">{#DOCUMENTATION}</a></li>
+                        <li><a href="https://fw.ahoydtu.de/fw/dev/" target="_blank">Download</a> & Test {#DEV_FIRMWARE}, <a href="https://github.com/lumapu/ahoy/blob/development03/src/CHANGES.md" target="_blank">{#DEV_CHANGELOG}</a></li>
+                        <li>{#DON_MAKE} <a href="https://paypal.me/lupusch"  target="_blank">{#DONATION}</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        {#HTML_FOOTER}
+        <script type="text/javascript">
+            var exeOnce = true;
+            var tickCnt = 0;
+            var ts = 0;
+            var commInfo = "";
+            var release = null;
+
+            function apiCb(obj) {
+                var e = document.getElementById("apiResult")
+                if(obj.success) {
+                    e.innerHTML = " {#COMMAND_EXE}"
+                    getAjax("/api/index", parse)
+                } else
+                    e.innerHTML = " {#ERROR}: " + obj.error
+            }
+
+            function setTime() {
+                var date = new Date()
+                var obj = {cmd: "set_time", token: "*", val: parseInt(date.getTime() / 1000)}
+                getAjax("/api/setup", apiCb, "POST", JSON.stringify(obj))
+            }
+
+            function parseGeneric(obj) {
+                if(exeOnce) {
+                    parseESP(obj)
+                    parseTitle(obj)
+                }
+                parseRssi(obj)
+            }
+
+            function parseSys(obj) {
+                ts = obj.ts_now;
+                var date = new Date(obj.ts_now * 1000);
+                var up = obj.generic["ts_uptime"];
+                var days = parseInt(up / 86400) % 365;
+                var hrs  = parseInt(up / 3600) % 24;
+                var min  = parseInt(up / 60) % 60;
+                var sec  = up % 60;
+                var e = document.getElementById("uptime");
+                e.innerHTML = days + " {#DAY}";
+                if(1 != days)
+                    e.innerHTML += "{#S}";
+                e.innerHTML += ", " + ("0"+hrs).substr(-2) + ":"
+                   + ("0"+min).substr(-2) + ":"
+                   + ("0"+sec).substr(-2);
+                var dSpan = document.getElementById("date");
+                if(0 != obj.ts_now) {
+                    if(obj.ts_now < 1680000000)
+                        setTime();
+                    else
+                        dSpan.innerHTML = toIsoDateStr(date);
+                }
+                else {
+                    dSpan.innerHTML = "";
+                    var e = inp("set", "sync from browser", 0, ["btn"], "set", "button");
+                    dSpan.appendChild(span("{#NTP_UNREACH}. "));
+                    dSpan.appendChild(e);
+                    dSpan.appendChild(span("", ["span"], "apiResult"));
+                    e.addEventListener("click", setTime);
+                }
+
+                if(obj.disNightComm) {
+                    if(((obj.ts_sunrise + obj.ts_offsSr) < obj.ts_now)
+                        && ((obj.ts_sunset + obj.ts_offsSs) > obj.ts_now)) {
+                        commInfo = "{#POLLING_STOP} " + (new Date((obj.ts_sunset + obj.ts_offsSs) * 1000).toLocaleString('de-DE'));
+                    }
+                    else {
+                        commInfo = "{#NIGHT_TIME}, ";
+                        if(obj.ts_now > (obj.ts_sunrise + obj.ts_offsSr)) {
+                            commInfo += "{#PAUSED_AT} " + (new Date((obj.ts_sunset + obj.ts_offsSs) * 1000).toLocaleString('de-DE'));
+                        }
+                        else {
+                            commInfo += "{#START_AT} " + (new Date((obj.ts_sunrise + obj.ts_offsSr) * 1000).toLocaleString('de-DE'));
+                        }
+                    }
+                }
+            }
+
+            function parseIv(obj, ts) {
+                var p = div(["none"]);
+                var total = 0;
+                var count = 0;
+                var mobile = window.screen.width < 470;
+
+                for(var i of obj) {
+                    var icon = iconSuccess;
+                    var cl = "icon-success";
+                    var avail = "";
+                    if(false == i["enabled"]) {
+                        icon = iconWarn;
+                        cl = "icon-warn";
+                        avail = "{#DISABLED}";
+                    } else if((false == i["is_avail"]) || (0 == ts)) {
+                        icon = iconInfo;
+                        cl = "icon-info";
+                        avail = "{#NOT_YET_AVAIL}";
+                    } else if(0 == i["ts_last_success"]) {
+                        avail = "{#AVAIL_NO_DATA}";
+                    } else {
+                        if (!mobile)
+                            avail = "{#AVAIL} ";
+                        if(false == i["is_producing"])
+                            avail += "{#NOT_PRODUCING}";
+                        else {
+                            icon = iconSuccessFull;
+                            avail += "{#PRODUCING} " + i.cur_pwr + " W";
+                            total += i.cur_pwr;
+                            count += 1;
+                        }
+                    }
+
+                    var text;
+                        if (mobile)
+                            text = "#";
+                        else
+                            text = "{#INVERTER} #";
+                    p.append(
+                            svg(icon, 30, 30, "icon " + cl),
+                            span(text + i["id"] + ": " + i["name"] + " " + avail),
+                            br()
+                        );
+
+                    if(false == i["is_avail"]) {
+                        if(i["ts_last_success"] > 0) {
+                            var date = new Date(i["ts_last_success"] * 1000);
+                            p.append(span("-> {#LAST_SUCCESS}: " + toIsoDateStr(date)), br());
+                        }
+                    }
+                }
+                document.getElementById("iv").replaceChildren(p);
+
+                if (count > 1) {
+                    var t = div(["none"]);
+                    t.append(svg(iconInfo, 30, 30, "icon icon-info"), span("Total: " + Math.round(total).toLocaleString() + " W"), br());
+                    document.getElementById("total").replaceChildren(t);
+                    document.getElementById("total").appendChild(div(["hr"]));
+                }
+            }
+
+            function parseWarn(warn) {
+                var p = div(["none"]);
+                for(var w of warn) {
+                    p.append(svg(iconWarn, 30, 30, "icon icon-warn"), span(w), br());
+                }
+
+                if(commInfo.length > 0)
+                    p.append(svg(iconInfo, 30, 30, "icon icon-info"), span(commInfo), br());
+
+                if(null != release) {
+                    if(getVerInt("{#VERSION}") < getVerInt(release))
+                        p.append(svg(iconInfo, 30, 30, "icon icon-info"), span("{#UPDATE_AVAIL}: " + release), br());
+                    else if(getVerInt("{#VERSION}") > getVerInt(release))
+                        p.append(svg(iconInfo, 30, 30, "icon icon-info"), span("{#USING_DEV_VERSION} {#VERSION}. {#DEV_ISSUE_RELEASE_VERSION}: " + release), br());
+                                       else
+                        p.append(svg(iconInfo, 30, 30, "icon icon-info"), span("{#RELEASE_INSTALLED}: " + release), br());
+                }
+
+                document.getElementById("warn_info").replaceChildren(p);
+            }
+
+            function tick() {
+                if(0 != ts)
+                    document.getElementById("date").innerHTML = toIsoDateStr((new Date((++ts) * 1000)));
+                if(++tickCnt >= 10) {
+                    tickCnt = 0;
+                    getAjax('/api/index', parse);
+                }
+            }
+
+            function parse(obj) {
+                if(null != obj) {
+                    if(exeOnce)
+                        parseNav(obj.generic);
+                    parseGeneric(obj.generic);
+                    parseSys(obj);
+                    parseIv(obj.inverter, obj.ts_now);
+                    parseWarn(obj.warnings);
+                    if(exeOnce) {
+                        window.setInterval("tick()", 1000);
+                        exeOnce = false;
+                        getAjax("https://api.github.com/repos/lumapu/ahoy/releases/latest", parseRelease);
+                    }
+                }
+            }
+
+
+            function getVerInt(ver) {
+                var a = ver.split('.');
+                return (a[0] << 24) | (a[1] << 16) | a[2];
+            }
+
+            function parseRelease(obj) {
+                release = obj.name.substring(6);
+                getAjax("/api/index", parse);
+            }
+
+            getAjax("/api/index", parse);
+        </script>
+    </body>
+</html>
