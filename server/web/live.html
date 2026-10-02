@@ -55,6 +55,8 @@
     <section class="board" aria-labelledby="h-inv">
       <div class="board-head"><span class="board-title" id="h-inv">The inverter</span><span class="total" id="stamp" style="color:var(--ink-2);font-size:13px"></span></div>
       <div class="metrics" id="metrics"></div>
+      <div class="board-head" style="margin-top:14px"><span class="board-title" style="font-size:16px">Connection</span><span id="diag" style="color:var(--ink-2);font-size:13px;max-width:60ch;text-align:right"></span></div>
+      <div class="metrics" id="conn"></div>
     </section>
   </div>
 
@@ -96,6 +98,24 @@ function render(d, age) {
   }).join("");
 }
 
+async function renderHealth() {
+  let h; try { h = await fetch("/api/health", { cache: "no-store" }).then(x => x.json()); } catch (e) { return; }
+  const ago = s => s == null ? "–" : s < 120 ? `${s} s ago` : s < 7200 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+  const up = s => s == null ? "–" : s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
+  const r = h.radio, d = h.device || {};
+  const m = (v, k) => `<div class="metric"><div class="v" style="font-size:22px">${v}</div><div class="k">${k}</div></div>`;
+  $("conn").innerHTML =
+    m(h.wifi.rssi == null ? "–" : `${h.wifi.rssi}<small>dBm</small>`, `Wi-Fi, ${h.wifi.label}`) +
+    m(r && r.tx ? `${r.ok}<small>of ${r.tx}</small>` : "–", r ? `Inverter replies, last ${r.minutes} min` : "Inverter replies") +
+    m(ago(h.last_reply_age), "Last inverter reply") + m(ago(h.contact_age), "Last contact with the roof") +
+    m(up(d.uptime), `Running since restart (${d.reset || "–"})`) + m(String(h.restarts_last_hour), "Restarts in the last hour") +
+    m(String(d.queue ?? "–"), "Readings waiting to upload") + m(String(d.fail_streak ?? "–"), "Failed uploads in a row");
+  $("diag").textContent = h.message;
+  const problem = !["ok", "night", "unknown"].includes(h.state);
+  if (problem) { $("kicker").textContent = h.message; $("kicker").parentElement.classList.add("alert"); }
+  else $("kicker").parentElement.classList.remove("alert");
+}
+
 async function tick() {
   try {
     const r = await fetch("/api/detail", { cache: "no-store" }).then(x => x.json());
@@ -103,8 +123,8 @@ async function tick() {
     render(r.detail, r.age_s);
   } catch (e) { $("kicker").textContent = "Can't reach the server right now"; }
 }
-tick();
-setInterval(tick, 15000);
+tick().then(renderHealth);
+setInterval(() => tick().then(renderHealth), 15000);
 });
 </script>
 </body>

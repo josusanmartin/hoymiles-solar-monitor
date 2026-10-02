@@ -17,8 +17,9 @@
 #include "../../appInterface.h"
 #include "../../hm/hmSystem.h"
 
-#define SOLAR_PUSH_QUEUE_LEN    64
-#define SOLAR_PUSH_BATCH_MAX    40
+#define SOLAR_PUSH_QUEUE_LEN    240     // about an hour of readings at one per 15 s
+#define SOLAR_PUSH_BATCH_MAX    10      // small uploads survive a weak Wi-Fi link
+#define SOLAR_PUSH_HEARTBEAT_MS 60000   // health report even when there is no new reading
 
 // Let's Encrypt roots (ISRG Root X1 + X2)
 static const char SOLAR_PUSH_CA[] =
@@ -74,6 +75,13 @@ typedef struct {
     float p[4], u[4], i[4];
 } solarReading_t;
 
+// link health, sent with every upload so the website can tell Wi-Fi problems from radio problems
+typedef struct {
+    uint32_t tx, ok, fail, none;    // radio requests sent, complete / broken / missing replies (since boot)
+    uint32_t lastRx;                // unix time of the last complete inverter reply
+    bool nrf;                       // nRF24 chip reachable
+} solarHealth_t;
+
 // latest full snapshot for the live detail page
 typedef struct {
     uint32_t ts;
@@ -105,6 +113,16 @@ class SolarPush {
             if(nullptr == iv)
                 return;
             record_t<> *rec = iv->getRecordStruct(RealTimeRunData_Debug);
+            solarHealth_t h;
+            h.tx = iv->radioStatistics.txCnt;
+            h.ok = iv->radioStatistics.rxSuccess;
+            h.fail = iv->radioStatistics.rxFail;
+            h.none = iv->radioStatistics.rxFailNoAnswer;
+            h.lastRx = rec->ts;
+            h.nrf = (nullptr != iv->radio) && iv->radio->isChipConnected();
+            portENTER_CRITICAL(&mMux);
+            mHealth = h;
+            portEXIT_CRITICAL(&mMux);
             if((rec->ts == mLastTs) || (rec->ts < 1600000000UL) || !iv->isAvailable())
                 return;
             mLastTs = rec->ts;
@@ -159,17 +177,18 @@ class SolarPush {
         void run() {
             static solarReading_t batch[SOLAR_PUSH_BATCH_MAX];
             uint8_t n = 0;
-            uint32_t backoff = 5000;
+            uint32_t backoff = 5000, lastPost = 0;
             for(;;) {
-                // collect whatever is queued (wait up to 10s for the first one)
+                // collect queued readings (wait up to 10 s for the first one)
                 solarReading_t r;
-                if((n == 0) && (pdTRUE != xQueueReceive(mQueue, &r, pdMS_TO_TICKS(10000))))
-                    continue;
-                if(n == 0)
+                if((n == 0) && (pdTRUE == xQueueReceive(mQueue, &r, pdMS_TO_TICKS(10000))))
                     batch[n++] = r;
-                while((n < SOLAR_PUSH_BATCH_MAX) && (pdTRUE == xQueueReceive(mQueue, &r, 0)))
+                while((n > 0) && (n < SOLAR_PUSH_BATCH_MAX) && (pdTRUE == xQueueReceive(mQueue, &r, 0)))
                     batch[n++] = r;
 
+                bool heartbeat = (millis() - lastPost) >= SOLAR_PUSH_HEARTBEAT_MS;
+                if((0 == n) && !heartbeat)
+                    continue;
                 if(WiFi.status() != WL_CONNECTED) {
                     vTaskDelay(pdMS_TO_TICKS(5000));
                     continue;
@@ -178,11 +197,28 @@ class SolarPush {
                     mSent += n;
                     n = 0;
                     backoff = 5000;
+                    mFailStreak = 0;
+                    lastPost = millis();
                 } else {
+                    mFailStreak++;
                     vTaskDelay(pdMS_TO_TICKS(backoff));
                     if(backoff < 60000)
                         backoff *= 2;
                 }
+            }
+        }
+
+        static const char *resetReason() {
+            switch(esp_reset_reason()) {
+                case ESP_RST_POWERON:  return "power on";
+                case ESP_RST_BROWNOUT: return "brownout";
+                case ESP_RST_SW:       return "software";
+                case ESP_RST_PANIC:    return "crash";
+                case ESP_RST_INT_WDT:
+                case ESP_RST_TASK_WDT:
+                case ESP_RST_WDT:      return "watchdog";
+                case ESP_RST_DEEPSLEEP: return "deep sleep";
+                default:               return "other";
             }
         }
 
@@ -202,6 +238,17 @@ class SolarPush {
                 body += buf;
             }
             body += F("]");
+
+            solarHealth_t h;
+            portENTER_CRITICAL(&mMux);
+            h = mHealth;
+            portEXIT_CRITICAL(&mMux);
+            snprintf(buf, sizeof(buf), ",\"health\":{\"uptime\":%lu,\"rssi\":%d,\"reset\":\"%s\",\"heap\":%u,\"nrf\":%s,"
+                "\"tx\":%lu,\"ok\":%lu,\"fail\":%lu,\"none\":%lu,\"last_rx\":%lu,\"queue\":%u,\"fail_streak\":%lu}",
+                (unsigned long)(millis() / 1000), (int)WiFi.RSSI(), resetReason(), (unsigned)ESP.getFreeHeap(), h.nrf ? "true" : "false",
+                (unsigned long)h.tx, (unsigned long)h.ok, (unsigned long)h.fail, (unsigned long)h.none, (unsigned long)h.lastRx,
+                (unsigned)uxQueueMessagesWaiting(mQueue), (unsigned long)mFailStreak);
+            body += buf;
 
             solarDetail_t dt;
             portENTER_CRITICAL(&mMux);
@@ -246,7 +293,7 @@ class SolarPush {
             secure.setCACert(SOLAR_PUSH_CA);
             secure.setTimeout(10);
             HTTPClient http;
-            http.setTimeout(10000);
+            http.setTimeout(15000);
             if(!(tls ? http.begin(secure, DEF_PUSH_URL) : http.begin(plain, DEF_PUSH_URL))) {
                 mLastCode = -100;
                 return false;
@@ -263,6 +310,8 @@ class SolarPush {
         QueueHandle_t mQueue = nullptr;
         uint32_t mLastTs = 0;
         solarDetail_t mDetail = {};
+        solarHealth_t mHealth = {};
+        volatile uint32_t mFailStreak = 0;
         portMUX_TYPE mMux = portMUX_INITIALIZER_UNLOCKED;
         volatile uint32_t mSent = 0;
         volatile int mLastCode = 0;

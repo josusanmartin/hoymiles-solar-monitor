@@ -129,3 +129,13 @@ a { color: inherit; }
   .nav { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } .bg, .mini-eq .t i { transition: none; } }
+
+/* connection health: Wi-Fi (roof -> internet) and radio (inverter -> roof) */
+.link { display: grid; gap: 3px; font-size: 13px; }
+.link .row { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.link .row b { font-weight: 650; min-width: 42px; }
+.link .row span { color: var(--ink-2); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.good { background: #7cf0a8; } .dot.warn { background: #ffd36b; } .dot.bad { background: #ff7b6b; }
+.kicker.alert { color: #fff; max-width: 52ch; align-items: flex-start; }
+.kicker.alert .pulse { margin-top: 6px; background: #ff7b6b; animation: none; }

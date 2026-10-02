@@ -19,6 +19,8 @@ What you get:
 - **Inverter page**: every value the inverter reports (voltages, currents, temperature, efficiency, per-panel data).
 - **Background photos that follow the weather** (sunny, overcast, rain, storm, dusk, night).
 - History in SQLite that survives DTU restarts and Wi-Fi drops.
+- **Connection health**: the ESP32 reports its Wi-Fi signal, restarts and how often the inverter answers, so the
+  site can tell you whether the Wi-Fi, the radio link or the power supply is the problem.
 
 ## What's in the repo
 
@@ -27,6 +29,7 @@ What you get:
 | `server/` | The server: Python 3.9+, standard library only. API, SQLite history, website. |
 | `firmware/ahoy/` | [AhoyDTU](https://github.com/lumapu/ahoy) 0.8.156 with two additions: the **SolarPush** upload plugin (`esp32-solar` build) and an **M5Stack Cardputer ADV** build with an on-screen display (`cardputer-adv`, see [CARDPUTER.md](firmware/ahoy/CARDPUTER.md)). |
 | `firmware/nrf24-bench/` | A small ESP32 sketch for testing nRF24 modules: register probe, 2.4 GHz energy scan, constant carrier. |
+| `firmware/cardputer-display/` | Turns an M5Stack Cardputer into a desk display for the website (live power, today vs forecast, panels, connection health). |
 | `docs/ahoy-changes-vs-upstream.patch` | Every change made to AhoyDTU. |
 
 ## 1. Hardware
@@ -37,6 +40,7 @@ What you get:
 | ESP32 dev board (ESP-WROOM-32) | Any 38-pin board with a 3V3 pin. |
 | **nRF24L01+** module | The plain module with the zig-zag PCB antenna is the safe choice. Some cheap **PA/LNA** modules with an SMA antenna pass every test but never get answers from the inverter, likely clone chips that handle acknowledgements differently. |
 | 100 nF capacitor (optional) | Across the nRF24's VCC and GND, close to the module. |
+| 0.96" SSD1306 OLED, I2C (optional) | Shows power, today's energy and Wi-Fi/radio status on the device itself: GND, VDD → 3V3, SCK → G22, SDA → G21. Handy for finding a good spot. |
 
 Wiring (ESP32 ↔ nRF24). On the module, the pin with the square pad is GND.
 
@@ -111,6 +115,16 @@ Later updates can go over Wi-Fi: build again and upload `.pio/build/esp32-solar/
 
 `esp32-solar` uses the `min_spiffs` partition layout to make room for HTTPS. If you change to it from another
 AhoyDTU build, the first flash must be over USB and the settings are reset.
+
+### Optional: Cardputer desk display
+
+```sh
+cd firmware/cardputer-display
+export SOLAR_WIFI_SSID="your wifi" SOLAR_WIFI_PASS="..." SOLAR_URL=https://solar.example.com
+pio run -t upload
+```
+
+The side button (G0) switches between live power and connection health; holding it changes the brightness.
 
 Already running stock AhoyDTU? Skip the firmware and run `server/relay.py` on any always-on computer at home:
 `SOLAR_URL=https://solar.example.com SOLAR_TOKEN=... python3 relay.py http://<dtu-ip>`.

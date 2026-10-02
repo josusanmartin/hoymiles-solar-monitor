@@ -91,6 +91,9 @@ def init_db():
         conn.execute(f"CREATE TABLE IF NOT EXISTS readings (ts INTEGER PRIMARY KEY, {cols})")
         # latest full snapshot of every inverter value, for the live detail page
         conn.execute("CREATE TABLE IF NOT EXISTS detail (id INTEGER PRIMARY KEY CHECK (id = 1), ts INTEGER, json TEXT)")
+        # link health reported by the DTU about once a minute (server receive time)
+        conn.execute("CREATE TABLE IF NOT EXISTS health (ts INTEGER PRIMARY KEY, uptime INTEGER, rssi INTEGER, reset TEXT, heap INTEGER,"
+                     " nrf INTEGER, tx INTEGER, ok INTEGER, fail INTEGER, none INTEGER, last_rx INTEGER, queue INTEGER, fail_streak INTEGER)")
 
 
 def local_day_bounds(day):
@@ -111,7 +114,15 @@ def ingest(payload):
             continue  # inverter clock not set or garbage
         clean.append([ts] + [float(r[f]) if isinstance(r.get(f), (int, float)) else None for f in FIELDS])
     detail = payload.get("detail")
+    health = payload.get("health")
     with _db_lock, db() as conn:
+        if isinstance(health, dict):
+            h = {k: health.get(k) for k in ("uptime", "rssi", "reset", "heap", "tx", "ok", "fail", "none", "last_rx", "queue", "fail_streak")}
+            conn.execute("INSERT OR REPLACE INTO health (ts, uptime, rssi, reset, heap, nrf, tx, ok, fail, none, last_rx, queue, fail_streak) "
+                         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                         (int(now), h["uptime"], h["rssi"], str(h["reset"] or "")[:20], h["heap"], 1 if health.get("nrf") else 0,
+                          h["tx"], h["ok"], h["fail"], h["none"], h["last_rx"], h["queue"], h["fail_streak"]))
+            conn.execute("DELETE FROM health WHERE ts < ?", (int(now) - 30 * 86400,))
         if clean:
             marks = ",".join("?" * (len(FIELDS) + 1))
             conn.executemany(f"INSERT OR REPLACE INTO readings (ts,{','.join(FIELDS)}) VALUES ({marks})", clean)
@@ -129,6 +140,105 @@ def latest():
         return {"reading": None}
     r = dict(row)
     return {"reading": r, "age_s": int(time.time() - r["ts"])}
+
+
+def sun_elevation(ts):
+    """solar elevation in degrees at the configured location (NOAA approximation)"""
+    import math
+    d = datetime.fromtimestamp(ts, ZoneInfo("UTC"))
+    n = d.timetuple().tm_yday
+    g = 2 * math.pi / 365 * (n - 1 + (d.hour - 12) / 24)
+    eqt = 229.18 * (0.000075 + 0.001868 * math.cos(g) - 0.032077 * math.sin(g) - 0.014615 * math.cos(2 * g) - 0.040849 * math.sin(2 * g))
+    decl = (0.006918 - 0.399912 * math.cos(g) + 0.070257 * math.sin(g) - 0.006758 * math.cos(2 * g) + 0.000907 * math.sin(2 * g)
+            - 0.002697 * math.cos(3 * g) + 0.00148 * math.sin(3 * g))
+    tst = d.hour * 60 + d.minute + eqt + 4 * LON
+    ha, lat = math.radians(tst / 4 - 180), math.radians(LAT)
+    cosz = math.sin(lat) * math.sin(decl) + math.cos(lat) * math.cos(decl) * math.cos(ha)
+    return 90 - math.degrees(math.acos(max(-1, min(1, cosz))))
+
+
+def wifi_label(rssi):
+    if rssi is None:
+        return "unknown"
+    return "strong" if rssi >= -60 else "good" if rssi >= -70 else "weak" if rssi >= -78 else "very weak"
+
+
+def health():
+    """Where is the chain broken? Wi-Fi (roof device -> internet) or radio (inverter -> roof device)."""
+    now = time.time()
+    with db() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM health WHERE ts >= ? ORDER BY ts", (int(now) - 3600,))]
+        last_h = conn.execute("SELECT * FROM health ORDER BY ts DESC LIMIT 1").fetchone()
+        last_r = conn.execute("SELECT ts FROM readings ORDER BY ts DESC LIMIT 1").fetchone()
+    last_h = dict(last_h) if last_h else None
+    contact = max(last_h["ts"] if last_h else 0, last_r["ts"] if last_r else 0)
+    contact_age = int(now - contact) if contact else None
+    daylight = sun_elevation(now) > 3
+
+    # restarts in the last hour: uptime going backwards between reports
+    restarts = sum(1 for a, b in zip(rows, rows[1:]) if b["uptime"] is not None and a["uptime"] is not None and b["uptime"] < a["uptime"])
+    # radio success over the last 15 minutes, within the current boot
+    win = [r for r in rows if r["ts"] >= now - 900]
+    for i in range(len(win) - 1, 0, -1):
+        if win[i]["uptime"] < win[i - 1]["uptime"]:
+            win = win[i:]
+            break
+    radio = None
+    if len(win) >= 2:
+        a, b = win[0], win[-1]
+        tx = b["tx"] - a["tx"]
+        radio = {"tx": tx, "ok": b["ok"] - a["ok"], "fail": b["fail"] - a["fail"], "none": b["none"] - a["none"],
+                 "minutes": round((b["ts"] - a["ts"]) / 60)}
+    last_reply_age = int(now - last_h["last_rx"]) if last_h and last_h["last_rx"] else None
+    rssi = last_h["rssi"] if last_h else None
+
+    # diagnosis, most important problem first
+    def mins(sec):
+        return f"{sec // 60} min" if sec < 7200 else f"{sec // 3600} h"
+    if contact_age is None:
+        state, msg = "unknown", "No data from the roof device yet."
+    elif contact_age > 180:
+        if rssi is not None and rssi < -75:
+            state, msg = "wifi", (f"No contact from the roof device for {mins(contact_age)}. Its Wi-Fi was {wifi_label(rssi)} "
+                                  f"({rssi} dBm) when it last reported, so it has most likely lost Wi-Fi.")
+        else:
+            state, msg = "offline", f"No contact from the roof device for {mins(contact_age)}. It has lost power or Wi-Fi."
+    elif restarts >= 2:
+        state, msg = "power", (f"The roof device restarted {restarts} times in the last hour (last reason: {last_h['reset']}). "
+                               "Check its power supply.")
+    elif not daylight:
+        state, msg = "night", "The roof device is online. The inverter is asleep until the sun is up."
+    elif radio and radio["tx"] >= 4 and radio["ok"] < 0.3 * radio["tx"]:
+        state, msg = "radio", (f"Wi-Fi is fine, but the inverter answered only {radio['ok']} of {radio['tx']} requests in the last "
+                               f"{radio['minutes']} minutes. Move the roof device closer to the inverter.")
+    elif last_h and last_reply_age is not None and last_reply_age > 600:
+        state, msg = "radio", f"Wi-Fi is fine, but there has been no reply from the inverter for {mins(last_reply_age)}."
+    elif rssi is not None and rssi < -75:
+        state, msg = "wifi_weak", f"Working, but the Wi-Fi signal is {wifi_label(rssi)} ({rssi} dBm). Uploads may drop out."
+    else:
+        state, msg = "ok", "Everything is working."
+    return {"state": state, "message": msg, "daylight": daylight, "contact_age": contact_age,
+            "wifi": {"rssi": rssi, "label": wifi_label(rssi)}, "radio": radio, "last_reply_age": last_reply_age,
+            "restarts_last_hour": restarts, "device": {k: last_h[k] for k in ("uptime", "reset", "heap", "queue", "fail_streak", "nrf")} if last_h else None}
+
+
+def summary():
+    """everything a small display needs in one request (the Cardputer display client)"""
+    lv, hl = latest(), health()
+    today = datetime.now(TZ).date()
+    with db() as conn:
+        d = daily_energy(conn, today)
+    try:
+        fc = forecast()
+        expected = fc["daily"][0]["est_kwh"] if fc["daily"] else None
+        weather = {"temp": fc["current"]["temp"], "code": fc["current"]["code"]}
+    except OSError:
+        expected, weather = None, None
+    r = lv.get("reading") or {}
+    return {"pac": r.get("pac"), "age_s": lv.get("age_s"), "panels": [r.get(f"p{i}") for i in range(1, 5)][:CONFIG["inverter"]["panels"]],
+            "today_kwh": d["kwh"] if d else 0, "peak_w": d["peak_w"] if d else 0, "expected_kwh": expected, "lifetime_kwh": r.get("yt"),
+            "weather": weather, "panel_max_w": CONFIG["inverter"]["panel_max_w"],
+            "health": {k: hl[k] for k in ("state", "message", "wifi", "radio", "contact_age", "last_reply_age", "restarts_last_hour")}}
 
 
 def latest_detail():
@@ -320,6 +430,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if url.path == "/api/live":
                 return self.send_json(latest())
+            if url.path == "/api/summary":
+                return self.send_json(summary())
+            if url.path == "/api/health":
+                return self.send_json(health())
             if url.path == "/api/config":
                 return self.send_json(public_config())
             if url.path == "/api/forecast":

@@ -271,6 +271,15 @@ class settings {
 
             readSettings("/settings.json");
 
+            #if defined(PLUGIN_DISPLAY) && defined(DEF_DISP_TYPE)
+            // default display for this build (e.g. a 0.96" SSD1306 OLED), unless one was configured in the web UI
+            if(DISP_TYPE_T0_NONE == mCfg.plugin.display.type) {
+                mCfg.plugin.display.type      = DEF_DISP_TYPE;
+                mCfg.plugin.display.disp_data = DEF_DISP_SDA;
+                mCfg.plugin.display.disp_clk  = DEF_DISP_SCL;
+            }
+            #endif
+
             #if defined(CARDPUTER_ADV)
             // nRF24 sits on the fixed EXT header, always use the compiled pinout
             mCfg.nrf.pinCs   = DEF_NRF_CS_PIN;
