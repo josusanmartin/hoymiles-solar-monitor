@@ -149,19 +149,28 @@ def day_series(day):
 
 
 def daily_energy(conn, day):
-    """kWh produced on a local day: lifetime counter delta (robust to restarts),
-    falling back to the inverter's daily counter."""
+    """kWh produced on a local day.
+
+    Primary: growth of the inverter's lifetime counter (yt) since the last reading before the day, which
+    counts everything even if the DTU started late. The inverter's daily counter (yd) is only used as a
+    fallback: it still shows yesterday's total until the inverter wakes up in the morning, so only the
+    last yd of the day is trusted, never the maximum."""
     start, end = local_day_bounds(day)
     r = conn.execute(
-        "SELECT MIN(yt) AS ytmin, MAX(yt) AS ytmax, MAX(yd) AS ydmax, MAX(pac) AS peak, COUNT(*) AS n "
+        "SELECT MAX(yt) AS ytmax, MIN(yt) AS ytmin, MAX(pac) AS peak, COUNT(*) AS n "
         "FROM readings WHERE ts >= ? AND ts < ? AND pac IS NOT NULL", (start, end)).fetchone()
     if not r or not r["n"]:
         return None
+    before = conn.execute("SELECT yt FROM readings WHERE ts < ? AND yt > 0 ORDER BY ts DESC LIMIT 1", (start,)).fetchone()
+    last_yd = conn.execute("SELECT yd FROM readings WHERE ts >= ? AND ts < ? AND yd IS NOT NULL ORDER BY ts DESC LIMIT 1",
+                           (start, end)).fetchone()
     kwh = None
-    if r["ytmax"] and r["ytmin"] is not None and r["ytmax"] > r["ytmin"]:
-        kwh = r["ytmax"] - r["ytmin"]
-    if r["ydmax"]:
-        kwh = max(kwh or 0, r["ydmax"] / 1000.0)  # yd covers energy before the first push of the day
+    if r["ytmax"]:
+        base = before["yt"] if before and before["yt"] <= r["ytmax"] else r["ytmin"]
+        kwh = max(0.0, r["ytmax"] - base)
+    if not before and last_yd and last_yd["yd"] is not None:
+        # first day of recording: the counter delta misses the hours before the DTU started
+        kwh = max(kwh or 0.0, last_yd["yd"] / 1000.0)
     return {"date": day.isoformat(), "kwh": round(kwh or 0, 3), "peak_w": round(r["peak"] or 0, 1), "samples": r["n"]}
 
 
