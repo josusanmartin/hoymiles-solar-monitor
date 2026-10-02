@@ -319,7 +319,7 @@ async function renderLive() {
   fresh = !!(r && age < 180); livePac = fresh ? r.pac : 0;
   const k = td.days[0]; todayKwh = k ? k.kwh : 0;
   $("pulse").className = "pulse" + (fresh ? "" : " off");
-  if (!(hl && !["ok", "night", "unknown"].includes(hl.state))) $("kicker").textContent = fresh ? ROOF
+  if (!(hl && !["ok", "night", "unknown", "dark"].includes(hl.state))) $("kicker").textContent = fresh ? ROOF
     : r ? `Last heard from the roof ${age < 7200 ? Math.round(age / 60) + " minutes" : Math.round(age / 3600) + " hours"} ago` : "Waiting for the first reading";
   $("giant").innerHTML = fresh ? `${fmt(r.pac)}<span class="u">W</span>` : `${fmt(todayKwh, 1)}<span class="u">kWh</span>`;
   writeLede();
@@ -341,6 +341,7 @@ async function renderHealth() {
   const wtxt = off ? (hl.contact_age == null ? "no data yet" : `no contact for ${Math.round(hl.contact_age / 60)} min`) : `${w.label}, ${w.rssi} dBm`;
   let rcls = "", rtxt = "–";
   if (!hl.daylight) { rtxt = "inverter asleep"; }
+  else if (hl.state === "dark") { rcls = "warn"; rtxt = "inverter off, too little sun"; }
   else if (hl.radio && hl.radio.tx > 0) {
     const q = hl.radio.ok / hl.radio.tx;
     rcls = q >= 0.7 ? "good" : q >= 0.3 ? "warn" : "bad";
@@ -348,7 +349,7 @@ async function renderHealth() {
   } else if (hl.last_reply_age != null) { rtxt = `last reply ${Math.round(hl.last_reply_age / 60)} min ago`; }
   $("link").innerHTML = `<div class="row"><i class="dot ${wcls}"></i><b>Wi-Fi</b><span>${wtxt}</span></div>
     <div class="row"><i class="dot ${rcls}"></i><b>Radio</b><span>${rtxt}</span></div>`;
-  const problem = !["ok", "night", "unknown"].includes(hl.state);
+  const problem = !["ok", "night", "unknown", "dark"].includes(hl.state);
   $("kicker").parentElement.classList.toggle("alert", problem);
   if (problem) $("kicker").textContent = hl.message;
 }

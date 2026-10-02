@@ -522,10 +522,16 @@ class NrfRadio : public Radio {
 
             mNrf24->stopListening();
             mNrf24->flush_rx();
+            #if defined(NRF_TX_SINGLE_SHOT)
+            // send each request once and go straight to listening: some nRF24 clones (often PA/LNA
+            // modules) never see the inverter's ACK, retransmit for ~35 ms and talk over its reply
+            mNrf24->setRetries(1, 0);
+            #else
             if(!isRetransmit && (mTxRetries != mTxRetriesNext)) {
                 mNrf24->setRetries(3, mTxRetriesNext);
                 mTxRetries = mTxRetriesNext;
             }
+            #endif
             mNrf24->setChannel(mRfChLst[mTxChIdx]);
             mNrf24->openWritingPipe(reinterpret_cast<uint8_t*>(&iv->radioId.u64));
             mNrf24->startFastWrite(mTxBuf.data(), len, false, true); // false (3) = request ACK response; true (4) reset CE to high after transmission

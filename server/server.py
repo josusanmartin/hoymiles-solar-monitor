@@ -157,6 +157,16 @@ def sun_elevation(ts):
     return 90 - math.degrees(math.acos(max(-1, min(1, cosz))))
 
 
+def low_light(now):
+    """the forecast expects so little output this hour that the inverter may be off (storm, heavy cloud, dusk)"""
+    try:
+        fc = forecast()
+    except OSError:
+        return False
+    hour = [h for h in fc["hourly"] if h["ts"] - 3600 <= now < h["ts"]]
+    return bool(hour) and (hour[0]["est_w"] < 120 or hour[0]["code"] >= 95)
+
+
 def wifi_label(rssi):
     if rssi is None:
         return "unknown"
@@ -208,6 +218,9 @@ def health():
                                "Check its power supply.")
     elif not daylight:
         state, msg = "night", "The roof device is online. The inverter is asleep until the sun is up."
+    elif radio and radio["tx"] >= 4 and radio["ok"] < 0.3 * radio["tx"] and low_light(now):
+        state, msg = "dark", (f"The inverter isn't answering ({radio['ok']} of {radio['tx']} requests), but there is very little "
+                              "sun right now, so it has probably switched itself off. It wakes up again when the light returns.")
     elif radio and radio["tx"] >= 4 and radio["ok"] < 0.3 * radio["tx"]:
         state, msg = "radio", (f"Wi-Fi is fine, but the inverter answered only {radio['ok']} of {radio['tx']} requests in the last "
                                f"{radio['minutes']} minutes. Move the roof device closer to the inverter.")
