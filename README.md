@@ -138,6 +138,7 @@ AhoyDTU's `/api/system` shows `radioNrf.isconnected`. This build adds a few diag
 | `radioNrf.probe` in `/api/system` | Raw register reads. All `00`: the module has no power or MISO is not connected. Must show `rd=A5` (a value written and read back). |
 | `GET /api/rfscan`, then `radioNrf.scan` | Energy on all 126 channels. Your Wi-Fi should show up; zeros everywhere mean the receiver hears nothing. |
 | `GET /api/cetest`, then `radioNrf.ceTest` | Checks that the CE wire actually controls transmission. |
+| `radioNrf.resets` in `/api/system` | How often the nRF24 lost its settings (a power dip resets it to 2 Mbps and it stops hearing the inverter). The firmware checks every 5 s and reconfigures it; a count that keeps growing means the module's power supply is unstable. |
 | `GET /api/carrier/<channel>` | Transmits a constant carrier for 20 s, then restarts. Combine with `firmware/nrf24-bench` on a second ESP32 to check the transmitter. |
 
 If the radio passes all of these and the inverter still never answers, swap the nRF24 module before anything else.

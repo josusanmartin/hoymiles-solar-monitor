@@ -164,7 +164,7 @@ def low_light(now):
     except OSError:
         return False
     hour = [h for h in fc["hourly"] if h["ts"] - 3600 <= now < h["ts"]]
-    return bool(hour) and (hour[0]["est_w"] < 120 or hour[0]["code"] >= 95)
+    return bool(hour) and hour[0]["est_w"] < 25
 
 
 def wifi_label(rssi):

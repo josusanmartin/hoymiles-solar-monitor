@@ -32,6 +32,7 @@ class Radio {
         virtual void catchInverter(Inverter<> *iv, uint8_t toCh) {}
         virtual bool isChipConnected(void) const { return false; }
         virtual String probe(void) { return String(); }
+        virtual uint16_t getResets(void) const { return 0; }
         virtual String scanResult(void) { return String(); }
         virtual void requestScan(void) {}
         virtual String ceResult(void) { return String(); }

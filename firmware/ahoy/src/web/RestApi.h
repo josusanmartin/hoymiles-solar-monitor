@@ -906,6 +906,7 @@ class RestApi {
                 obj[F("sn")]          = String(mRadioNrf->getDTUSn(), HEX);
                 obj[F("irqOk")]       = mRadioNrf->mIrqOk;
                 obj[F("probe")]       = mRadioNrf->probe();
+                obj[F("resets")]      = mRadioNrf->getResets();
                 obj[F("scan")]        = mRadioNrf->scanResult();
                 obj[F("ceTest")]      = mRadioNrf->ceResult();
             }

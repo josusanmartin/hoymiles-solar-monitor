@@ -79,6 +79,7 @@ typedef struct {
 typedef struct {
     uint32_t tx, ok, fail, none;    // radio requests sent, complete / broken / missing replies (since boot)
     uint32_t lastRx;                // unix time of the last complete inverter reply
+    uint16_t resets;                // times the nRF24 lost its configuration and was repaired
     bool nrf;                       // nRF24 chip reachable
 } solarHealth_t;
 
@@ -120,6 +121,7 @@ class SolarPush {
             h.none = iv->radioStatistics.rxFailNoAnswer;
             h.lastRx = rec->ts;
             h.nrf = (nullptr != iv->radio) && iv->radio->isChipConnected();
+            h.resets = (nullptr != iv->radio) ? iv->radio->getResets() : 0;
             portENTER_CRITICAL(&mMux);
             mHealth = h;
             portEXIT_CRITICAL(&mMux);
@@ -244,10 +246,10 @@ class SolarPush {
             h = mHealth;
             portEXIT_CRITICAL(&mMux);
             snprintf(buf, sizeof(buf), ",\"health\":{\"uptime\":%lu,\"rssi\":%d,\"reset\":\"%s\",\"heap\":%u,\"nrf\":%s,"
-                "\"tx\":%lu,\"ok\":%lu,\"fail\":%lu,\"none\":%lu,\"last_rx\":%lu,\"queue\":%u,\"fail_streak\":%lu}",
+                "\"tx\":%lu,\"ok\":%lu,\"fail\":%lu,\"none\":%lu,\"last_rx\":%lu,\"queue\":%u,\"fail_streak\":%lu,\"nrf_resets\":%u}",
                 (unsigned long)(millis() / 1000), (int)WiFi.RSSI(), resetReason(), (unsigned)ESP.getFreeHeap(), h.nrf ? "true" : "false",
                 (unsigned long)h.tx, (unsigned long)h.ok, (unsigned long)h.fail, (unsigned long)h.none, (unsigned long)h.lastRx,
-                (unsigned)uxQueueMessagesWaiting(mQueue), (unsigned long)mFailStreak);
+                (unsigned)uxQueueMessagesWaiting(mQueue), (unsigned long)mFailStreak, (unsigned)h.resets);
             body += buf;
 
             solarDetail_t dt;

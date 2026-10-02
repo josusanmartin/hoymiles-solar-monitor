@@ -84,17 +84,7 @@ class NrfRadio : public Radio {
             #else
                 mNrf24->begin(mSpi.get(), mCfg->pinCe, mCfg->pinCs);
             #endif
-            mNrf24->setRetries(3, 15); // wait 3*250 = 750us, 16 * 250us -> 4000us = 4ms
-
-            mNrf24->setDataRate(RF24_250KBPS);
-            //mNrf24->setAutoAck(true); // enabled by default
-            //mNrf24->enableDynamicAck();
-            mNrf24->enableDynamicPayloads();
-            mNrf24->setCRCLength(RF24_CRC_16);
-            mNrf24->setAddressWidth(5);
-            mNrf24->openReadingPipe(1, reinterpret_cast<uint8_t*>(&mDtuRadioId));
-            mNrf24->maskIRQ(false, false, false); // enable all receiving interrupts
-            mNrf24->setPALevel(1); // low is default
+            configure();
 
             if(mNrf24->isChipConnected()) {
                 DPRINTLN(DBG_INFO, F("Radio Config:"));
@@ -105,10 +95,46 @@ class NrfRadio : public Radio {
                 DPRINTLN(DBG_WARN, F("WARNING! your NRF24 module can't be reached, check the wiring"));
         }
 
+        // register setup; also used to repair the module after it lost power and reset to its defaults
+        void configure(void) {
+            mNrf24->setRetries(3, 15); // wait 3*250 = 750us, 16 * 250us -> 4000us = 4ms
+            mTxRetries = 15;
+
+            mNrf24->setDataRate(RF24_250KBPS);
+            //mNrf24->setAutoAck(true); // enabled by default
+            //mNrf24->enableDynamicAck();
+            mNrf24->enableDynamicPayloads();
+            mNrf24->setCRCLength(RF24_CRC_16);
+            mNrf24->setAddressWidth(5);
+            mNrf24->openReadingPipe(1, reinterpret_cast<uint8_t*>(&mDtuRadioId));
+            mNrf24->maskIRQ(false, false, false); // enable all receiving interrupts
+            mNrf24->setPALevel(1); // low is default
+        }
+
+        uint16_t getResets(void) const override { return mResets; }
+
         // returns true if communication is active
         void loop(void) {
             if(!mCfg->enabled)
                 return;
+
+            #if defined(SPI_HAL)
+            // a power dip resets the nRF24 to its defaults (2 Mbps, no dynamic payloads) and it goes deaf
+            // for the inverter; check every few seconds while idle and reconfigure it when that happened
+            if(!mNRFisInRX && ((millis() - mLastCfgCheck) > 5000)) {
+                mLastCfgCheck = millis();
+                uint8_t rfSetup = 0, dynpd = 0;
+                mNrfHal.read(0x06, &rfSetup, 1);   // RF_SETUP
+                mNrfHal.read(0x1c, &dynpd, 1);     // DYNPD
+                bool alive = (0x00 != rfSetup) && (0xff != rfSetup);
+                if(alive && (((rfSetup & 0x28) != 0x20) || (0 == dynpd))) {
+                    mResets++;
+                    DPRINT(DBG_WARN, F("nRF24 lost its configuration (power dip?), reconfiguring, count "));
+                    DBGPRINTLN(String(mResets));
+                    configure();
+                }
+            }
+            #endif
 
             #if defined(SPI_HAL)
             if(mScanReq && !mNRFisInRX) {
@@ -582,6 +608,8 @@ class NrfRadio : public Radio {
         #if defined(SPI_HAL)
         nrfHal mNrfHal;
         std::atomic<bool> mScanReq = false;
+        uint16_t mResets = 0;
+        uint32_t mLastCfgCheck = 0;
         std::atomic<bool> mCeTestReq = false;
         volatile uint8_t mCarrierCh = 255;
         uint8_t mCarrierSecs = 20;
